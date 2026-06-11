@@ -1,0 +1,19 @@
+{
+  "case_id": "m57-jean",
+  "description": "M57 Jean laptop disk image",
+  "evidence_files": [
+    {
+      "path": "/evidence/disk/nps-2008-jean.E01",
+      "sha256": "df3a995c7a594e0ba6d95b9aae735a444313fae435a87e7536f9dad3db2769ce",
+      "file_type": "disk_image",
+      "size_bytes": 1572860321
+    },
+    {
+      "path": "/evidence/disk/nps-2008-jean.E02",
+      "sha256": "07f1f78c857d5b5809ac7a68e1467d36872fa74f047ee2c799d37b18aad4f5aa",
+      "file_type": "disk_image",
+      "size_bytes": 1466890611
+    }
+  ],
+  "created_utc": "2026-06-11T00:22:16.020953Z"
+}
