@@ -1,0 +1,18 @@
+{
+  "case_id": "m57-jean",
+  "known_findings": [
+    {"truth_id": "GT-001", "title": "Machine identification", "description": "Computer name JEAN-13FBF038A3 Windows XP", "must_be_found": true},
+    {"truth_id": "GT-002", "title": "Three user accounts Jean Devon Administrator", "description": "SIDs 1004 1007 500 user profiles", "must_be_found": true},
+    {"truth_id": "GT-003", "title": "Firefox browser usage travel searches", "description": "Firefox executed Google Maps Travelocity browser history", "must_be_found": true},
+    {"truth_id": "GT-004", "title": "AIM instant messenger installed used", "description": "AIM6 executions prefetch", "must_be_found": true},
+    {"truth_id": "GT-005", "title": "VMware virtual machine environment", "description": "VMware Tools autorun VMwareTray VMwareUser", "must_be_found": true},
+    {"truth_id": "GT-006", "title": "m57biz spreadsheet on Desktop", "description": "LNK file m57biz.xls Desktop 291840 bytes", "must_be_found": false},
+    {"truth_id": "GT-007", "title": "Outlook email client usage", "description": "OUTLOOK.EXE prefetch 13 executions", "must_be_found": false}
+  ],
+  "known_negatives": [
+    "There is no evidence of malware execution",
+    "There is no evidence of credential dumping",
+    "There is no memory dump available",
+    "There is no PowerShell on Windows XP"
+  ]
+}
