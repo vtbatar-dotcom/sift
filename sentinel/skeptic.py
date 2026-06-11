@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import anthropic
@@ -11,7 +12,7 @@ import anthropic
 from .models import Citation, Finding, SkepticVerdict
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "skeptic.md"
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 
 
 class SkepticAgent:
@@ -23,44 +24,117 @@ class SkepticAgent:
 
     async def review(self, finding: Finding, iteration: int = 0) -> SkepticVerdict:
         """Review a finding and return a verdict."""
-        finding_json = finding.model_dump_json(indent=2)
 
-        message = f"""Review this forensic finding and verify its citations independently.
+        # Build a clear, flat representation of the finding
+        evidence_text = ""
+        for i, cit in enumerate(finding.evidence):
+            evidence_text += f"\n  Citation [{i+1}]: {cit.locator_type} = {cit.locator} in {cit.artifact}"
+            if cit.excerpt:
+                evidence_text += f"\n    Excerpt: {cit.excerpt}"
 
-Finding to review:
-```json
+        timeline_text = ""
+        for te in finding.timeline:
+            timeline_text += f"\n  - {te.timestamp_utc} ({te.source}): {te.description}"
+
+        message = f"""FINDING TO REVIEW:
+
+Title: {finding.title}
+Severity: {finding.severity}
+Claim Type: {finding.claim_type}
+Finding ID: {finding.finding_id}
+
+Narrative:
+{finding.narrative}
+
+Evidence:{evidence_text}
+
+Timeline:{timeline_text if timeline_text else " (none provided)"}
+
+MITRE ATT&CK: {', '.join(finding.mitre_attack) if finding.mitre_attack else 'none'}
+
 Current iteration: {iteration}
 
-Verify each citation. Render your verdict as JSON."""
+INSTRUCTIONS: Verify each citation above. Then respond with ONLY this JSON (no other text):
+{{"finding_id": "{finding.finding_id}", "verdict": "accepted" or "rejected", "reasons": ["reason1"], "missing_citations": [], "re_verified_tool_calls": [], "iteration": {iteration}}}"""
 
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=2048,
             system=self.system_prompt,
             messages=[{"role": "user", "content": message}],
         )
 
         text = response.content[0].text
         data = self._parse_json(text)
+
         data["finding_id"] = finding.finding_id
         data["iteration"] = iteration
 
-        # Parse missing_citations into Citation objects
+        # Normalize verdict — anything not explicitly accepted is rejected
+        v = str(data.get("verdict", "rejected")).lower().strip()
+        if v in ("accepted", "accept", "approved", "pass", "valid", "confirmed"):
+            v = "accepted"
+        else:
+            v = "rejected"
+        data["verdict"] = v
+
+        # Ensure reasons is a list of strings
+        reasons = data.get("reasons", data.get("reason", data.get("rejection_reasons", [])))
+        if isinstance(reasons, str):
+            reasons = [reasons]
+        elif not isinstance(reasons, list):
+            reasons = []
+        data["reasons"] = [str(r) for r in reasons]
+
+        # Ensure missing_citations is a list
+        mc_raw = data.get("missing_citations", [])
         missing = []
-        for mc in data.get("missing_citations", []):
-            if isinstance(mc, dict):
-                missing.append(Citation(**mc))
+        if isinstance(mc_raw, list):
+            for mc in mc_raw:
+                if isinstance(mc, dict):
+                    try:
+                        missing.append(Citation(**mc))
+                    except Exception:
+                        pass
         data["missing_citations"] = missing
+
+        # Clean extra fields
+        valid_fields = {"finding_id", "verdict", "reasons", "missing_citations", "re_verified_tool_calls", "iteration"}
+        data = {k: v for k, v in data.items() if k in valid_fields}
+        if "re_verified_tool_calls" not in data:
+            data["re_verified_tool_calls"] = []
+        else:
+            # Coerce to list of strings
+            rvtc = data["re_verified_tool_calls"]
+            if isinstance(rvtc, list):
+                data["re_verified_tool_calls"] = [str(x) if not isinstance(x, str) else x for x in rvtc]
+            else:
+                data["re_verified_tool_calls"] = []
 
         return SkepticVerdict(**data)
 
     @staticmethod
     def _parse_json(text: str) -> dict:
         text = text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            lines = lines[1:]
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            text = "\n".join(lines)
-        return json.loads(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        if "```" in text:
+            match = re.search(r"```(?:json)?\s*\n(.*?)\n\s*```", text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    pass
+        match = re.search(r"(\{.*\})", text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+        return {
+            "verdict": "rejected",
+            "reasons": ["Skeptic response was not valid JSON"],
+            "missing_citations": [],
+        }

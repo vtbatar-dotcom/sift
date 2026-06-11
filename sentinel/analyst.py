@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import anthropic
 from .models import Finding, SkepticVerdict
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "analyst.md"
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 
 
 class AnalystAgent:
@@ -71,16 +72,31 @@ Please revise this finding to address all rejection reasons. Either:
 2. Remove unsupported claims
 3. Downgrade claim_type from "confirmed" to "inferred" if evidence is circumstantial
 
-Return the revised finding as a single JSON object (not an array)."""
+Return the revised finding as a single JSON object (not an array).
+Use these EXACT field names: title, severity (info/low/med/high/critical), narrative (string), claim_type (confirmed/inferred), evidence (list), timeline (list), mitre_attack (list)."""
 
         text = self._call(message)
-        data = self._parse_json(text)
+        try:
+            data = self._parse_json(text)
+        except Exception:
+            # If we can't parse, return the original finding
+            return finding
         if isinstance(data, list):
-            data = data[0]
+            data = data[0] if data else {}
         data["case_id"] = self.case_id
         data["finding_id"] = finding.finding_id
         data["supersedes"] = [finding.finding_id]
-        return Finding(**data)
+
+        # Use the same normalization as initial findings
+        from .investigator import normalize_finding
+        data = normalize_finding(data, self.case_id)
+        data["finding_id"] = finding.finding_id
+        data["supersedes"] = [finding.finding_id]
+
+        try:
+            return Finding(**data)
+        except Exception:
+            return finding
 
     def _parse_findings(self, text: str) -> list[dict]:
         """Extract JSON findings from LLM response."""
@@ -93,12 +109,27 @@ Return the revised finding as a single JSON object (not an array)."""
 
     @staticmethod
     def _parse_json(text: str) -> dict | list:
-        """Parse JSON from text, handling markdown fences."""
+        """Parse JSON from text, handling markdown fences and preamble."""
         text = text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            lines = lines[1:]  # remove opening fence
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            text = "\n".join(lines)
-        return json.loads(text)
+        # Try direct parse
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        # Strip markdown fences
+        if "```" in text:
+            match = re.search(r"```(?:json)?\s*\n(.*?)\n\s*```", text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    pass
+        # Find first [ ... ] or { ... } block
+        for pattern in [r"(\[.*\])", r"(\{.*\})"]:
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    continue
+        raise ValueError(f"Could not parse JSON from response: {text[:200]}")
