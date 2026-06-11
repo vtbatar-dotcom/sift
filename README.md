@@ -14,3 +14,7 @@ pytest tests/ -v
 ## License
 
 Apache 2.0
+
+## Walkthrough Recording
+
+https://asciinema.org/a/UOsuastvU443N8rA
